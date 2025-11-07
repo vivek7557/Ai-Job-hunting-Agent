@@ -1,0 +1,9 @@
+pyyaml
+requests
+beautifulsoup4
+lxml
+tldextract
+python-dateutil
+apscheduler
+jinja2
+markdown
