@@ -1,0 +1,90 @@
+# ──────────────────────────────────────────────
+# AI Job-Hunting Agent Config — Vivek Giri
+# Targeting entry-level ML, LLM, and AI roles
+# ──────────────────────────────────────────────
+
+user:
+  name: "Vivek Giri"
+  email: "vivekgiri556@example.com"
+
+preferences:
+  titles:
+    - "Machine Learning Engineer"
+    - "LLM Engineer"
+    - "Data Scientist"
+    - "AI Intern"
+  locations:
+    - "Remote"
+    - "Bengaluru"
+    - "Hyderabad"
+    - "Pune"
+    - "Delhi"
+  include_keywords:
+    - "python"
+    - "sql"
+    - "pytorch"
+    - "nlp"
+    - "transformers"
+    - "llm"
+    - "machine learning"
+    - "deep learning"
+  exclude_keywords:
+    - "senior only"
+    - "10+ years"
+    - "lead engineer"
+    - "manager"
+
+sources:
+  # Public AI/ML job boards
+  - type: "rss"
+    name: "AI-Jobs.net"
+    url: "https://ai-jobs.net/rss.xml"
+  - type: "rss"
+    name: "WeWorkRemotely - Data Jobs"
+    url: "https://weworkremotely.com/categories/remote-data-jobs.rss"
+  - type: "json"
+    name: "RemoteOK - API"
+    url: "https://remoteok.com/api"
+
+  # Popular company job boards (Lever/Greenhouse/Ashby)
+  - type: "lever"
+    name: "HuggingFace Lever"
+    subdomain: "huggingface"
+  - type: "greenhouse"
+    name: "OpenAI Greenhouse"
+    board_token: "openai"
+  - type: "ashby"
+    name: "Anthropic Ashby"
+    org: "anthropic"
+  - type: "greenhouse"
+    name: "NVIDIA Greenhouse"
+    board_token: "nvidia"
+  - type: "ashby"
+    name: "Cohere Ashby"
+    org: "cohere"
+  - type: "ashby"
+    name: "Scale AI Ashby"
+    org: "scaleai"
+  - type: "greenhouse"
+    name: "Runway Greenhouse"
+    board_token: "runway"
+
+notify:
+  email:
+    enabled: false      # set true + add SMTP info if you want email alerts
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    smtp_user: "vivekgiri556@example.com"
+    smtp_pass: "your_app_password_here"
+    to: "vivekgiri556@example.com"
+  telegram:
+    enabled: false       # You can enable later if you set up a Telegram bot
+
+schedule:
+  interval_minutes: 60   # run every hour
+
+cv:
+  enabled: true
+  base_resume_md: "base_resume.md"
+  output_dir: "./generated_cvs"
+  export_pdf: false      # set true if you install Pandoc

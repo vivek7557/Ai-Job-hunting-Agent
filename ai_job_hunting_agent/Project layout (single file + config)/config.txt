@@ -1,0 +1,4 @@
+job_agent.py # the agent (all logic here)
+config.yaml # your preferences, sources, SMTP & Telegram settings
+skills.txt # optional: your canonical skills list (one per line)
+base_resume.md # your base resume in Markdown (placeholders included)
