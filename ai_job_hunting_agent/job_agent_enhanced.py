@@ -119,7 +119,7 @@ def get_conn():
 def make_uid(source, job_id): return hashlib.md5(f"{source}|{job_id}".encode()).hexdigest()
 
 # ─────────────────────────────────────────────
-# ROLE MATCHING LOGIC (NEW)
+# ROLE & LOCATION MATCHING LOGIC (NEW)
 # ─────────────────────────────────────────────
 def calculate_role_relevance(job_title: str, target_role: str) -> float:
     """Calculate how relevant a job title is to the target role (0-100)"""
@@ -147,13 +147,48 @@ def calculate_role_relevance(job_title: str, target_role: str) -> float:
     
     return 0.0
 
-def filter_jobs_by_role(jobs: List[Dict], target_role: str, min_relevance: float = 30.0) -> List[Dict]:
-    """Filter jobs based on role relevance and add relevance scores"""
+def check_location_match(job_location: str, target_location: str) -> bool:
+    """Check if job location matches target location"""
+    job_loc = job_location.lower().strip()
+    target_loc = target_location.lower().strip()
+    
+    # Remote jobs match all locations
+    if "remote" in job_loc or "anywhere" in job_loc or "worldwide" in job_loc:
+        return True
+    
+    # Direct match
+    if target_loc in job_loc or job_loc in target_loc:
+        return True
+    
+    # Country-level matching
+    location_groups = {
+        "india": ["india", "bangalore", "mumbai", "delhi", "hyderabad", "pune", "chennai", "kolkata", "bengaluru"],
+        "usa": ["usa", "united states", "us", "california", "new york", "texas", "washington", "boston"],
+        "uk": ["uk", "united kingdom", "london", "manchester", "edinburgh"],
+        "germany": ["germany", "berlin", "munich", "frankfurt"],
+        "canada": ["canada", "toronto", "vancouver", "montreal"]
+    }
+    
+    for country, cities in location_groups.items():
+        if any(city in target_loc for city in cities):
+            if any(city in job_loc for city in cities):
+                return True
+    
+    return False
+
+def filter_jobs_by_role_and_location(jobs: List[Dict], target_role: str, target_location: str, min_relevance: float = 20.0) -> List[Dict]:
+    """Filter jobs based on role relevance and location, add relevance scores"""
     filtered = []
     for job in jobs:
+        # Calculate role relevance
         relevance = calculate_role_relevance(job["job_title"], target_role)
         job["role_relevance"] = relevance
-        if relevance >= min_relevance:
+        
+        # Check location match
+        location_match = check_location_match(job["location"], target_location)
+        
+        # Include if role is relevant AND location matches
+        if relevance >= min_relevance and location_match:
             filtered.append(job)
     
     # Sort by relevance (highest first)
@@ -258,7 +293,7 @@ def clean_jobs(jobs):
     return out
 
 def fetch_real_jobs(role, loc):
-    """Fetch jobs from all sources in parallel with role filtering"""
+    """Fetch jobs from all sources in parallel with role and location filtering"""
     all_jobs = []
     
     with st.spinner(f"🔍 Fetching jobs for **{role}** in **{loc}**..."):
@@ -276,14 +311,19 @@ def fetch_real_jobs(role, loc):
                 try:
                     jobs = future.result()
                     all_jobs.extend(jobs)
+                    if jobs:
+                        st.info(f"✓ {source}: {len(jobs)} jobs")
                 except Exception as e:
                     st.warning(f"⚠️ {source} scraping failed")
     
-    # Clean and filter by role
+    # Clean and filter by role AND location
     cleaned = clean_jobs(all_jobs)
-    filtered = filter_jobs_by_role(cleaned, role, min_relevance=30.0)
+    filtered = filter_jobs_by_role_and_location(cleaned, role, loc, min_relevance=20.0)
     
-    st.success(f"✅ Found {len(filtered)} relevant jobs for **{role}** (filtered from {len(cleaned)} total)")
+    # Show filtering stats
+    location_filtered = sum(1 for j in cleaned if check_location_match(j["location"], loc))
+    st.success(f"✅ Found **{len(filtered)}** relevant jobs for **{role}** in **{loc}**")
+    st.caption(f"📊 Total scraped: {len(all_jobs)} → Cleaned: {len(cleaned)} → Location match: {location_filtered} → Final: {len(filtered)}")
     
     return filtered
 
@@ -301,11 +341,25 @@ def save_jobs(jobs):
              j["posted_time"],j["fetched_at"],j["is_new"],j.get("role_relevance",0)))
     conn.commit();conn.close()
 
-def load_jobs():
+def load_jobs(target_role: str = None, target_location: str = None):
+    """Load jobs from database with optional filtering"""
     conn=get_conn();cur=conn.cursor()
     cur.execute("SELECT * FROM jobs ORDER BY role_relevance DESC, fetched_at DESC")
     cols=[d[0] for d in cur.description];rows=[dict(zip(cols,r)) for r in cur.fetchall()]
-    conn.close();return rows
+    conn.close()
+    
+    # Apply runtime filters if provided
+    if target_role and target_location:
+        filtered = []
+        for job in rows:
+            if check_location_match(job["location"], target_location):
+                # Recalculate relevance for current role
+                job["role_relevance"] = calculate_role_relevance(job["job_title"], target_role)
+                if job["role_relevance"] >= 20.0:
+                    filtered.append(job)
+        return sorted(filtered, key=lambda x: x["role_relevance"], reverse=True)
+    
+    return rows
 
 def mark_applied(uid):
     conn=get_conn();conn.execute("INSERT OR REPLACE INTO applied_jobs VALUES (?,?)",
