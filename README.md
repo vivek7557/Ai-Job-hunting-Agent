@@ -1,4 +1,3 @@
-[README (2).md](https://github.com/user-attachments/files/23495329/README.2.md)
 # 🧠 AI Job Hunting Agent — Pro
 
 An intelligent real-time job hunting assistant built with **Python, Streamlit, and Machine Learning**.  
@@ -50,7 +49,7 @@ streamlit run real_time_job.py
 **Vivek**  
 Machine Learning Engineer | AI Product Builder  
 📧 your.email@example.com  
-🌐 [LinkedIn Profile or Portfolio link]  
+🌐 [LinkedIn Profile or Portfolio link](https://www.linkedin.com/in/vivekgiri7557)]  
 
 ---
 
