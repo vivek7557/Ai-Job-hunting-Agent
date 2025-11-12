@@ -1,12 +1,12 @@
 """
-AI Job Hunting Agent — Location Fixed + CV Intelligence
+AI Job Hunting Agent — Multi-API Job Board Aggregator
 --------------------------------------------------------
+✅ 10+ Job Board APIs integrated
 ✅ Instant location updates (India, USA, etc.)
 ✅ CV upload + JD match scoring
 ✅ Skill analytics & suggestions
 ✅ Hourly auto-refresh using latest preferences
 ✅ Direct job links only (no redirect portals)
-✅ ENHANCED: Role-specific filtering & multi-threading
 """
 
 import os, sqlite3, threading, time, io, re, hashlib
@@ -33,7 +33,7 @@ except Exception:
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
-APP_NAME = "AI Job Hunting Agent — Pro"
+APP_NAME = "AI Job Hunting Agent — Multi-API Pro"
 DATABASE_NAME = "job_agent_realtime.db"
 DEFAULT_ROLE = "Machine Learning Engineer"
 DEFAULT_LOCATION = "India"
@@ -44,6 +44,14 @@ HEADERS = {
                   "Chrome/120.0.0.0 Safari/537.36"
 }
 
+# API KEYS - Add your own keys here (free tier available for most)
+API_KEYS = {
+    "jsearch_rapidapi": os.getenv("JSEARCH_API_KEY", ""),  # RapidAPI JSearch
+    "adzuna_app_id": os.getenv("ADZUNA_APP_ID", ""),
+    "adzuna_app_key": os.getenv("ADZUNA_APP_KEY", ""),
+    "reed_api_key": os.getenv("REED_API_KEY", ""),
+}
+
 SKILLS = [
     "python","sql","machine learning","deep learning","nlp","transformers","pandas","numpy",
     "scikit-learn","tensorflow","pytorch","keras","xgboost","lightgbm","feature engineering",
@@ -52,7 +60,7 @@ SKILLS = [
 ]
 
 # ─────────────────────────────────────────────
-# ROLE MATCHING KEYWORDS (NEW)
+# ROLE MATCHING KEYWORDS
 # ─────────────────────────────────────────────
 ROLE_KEYWORDS = {
     "machine learning": ["ml", "machine learning", "data scientist", "ai engineer"],
@@ -106,7 +114,6 @@ CREATE TABLE IF NOT EXISTS cv_store (
 def init_db():
     with sqlite3.connect(DATABASE_NAME) as c:
         c.executescript(SCHEMA)
-        # Add role_relevance column if it doesn't exist
         try:
             c.execute("ALTER TABLE jobs ADD COLUMN role_relevance REAL DEFAULT 0")
         except:
@@ -119,25 +126,22 @@ def get_conn():
 def make_uid(source, job_id): return hashlib.md5(f"{source}|{job_id}".encode()).hexdigest()
 
 # ─────────────────────────────────────────────
-# ROLE & LOCATION MATCHING LOGIC (NEW)
+# ROLE & LOCATION MATCHING LOGIC
 # ─────────────────────────────────────────────
 def calculate_role_relevance(job_title: str, target_role: str) -> float:
     """Calculate how relevant a job title is to the target role (0-100)"""
     job_lower = job_title.lower()
     role_lower = target_role.lower()
     
-    # Direct match
     if role_lower in job_lower:
         return 100.0
     
-    # Check keyword groups
     for key_role, keywords in ROLE_KEYWORDS.items():
         if any(kw in role_lower for kw in keywords):
             for keyword in keywords:
                 if keyword in job_lower:
                     return 85.0
     
-    # Fuzzy word matching
     role_words = set(role_lower.split())
     job_words = set(job_lower.split())
     common = role_words & job_words
@@ -152,21 +156,18 @@ def check_location_match(job_location: str, target_location: str) -> bool:
     job_loc = job_location.lower().strip()
     target_loc = target_location.lower().strip()
     
-    # Remote jobs match all locations
     if "remote" in job_loc or "anywhere" in job_loc or "worldwide" in job_loc:
         return True
     
-    # Direct match
     if target_loc in job_loc or job_loc in target_loc:
         return True
     
-    # Country-level matching
     location_groups = {
-        "india": ["india", "bangalore", "mumbai", "delhi", "hyderabad", "pune", "chennai", "kolkata", "bengaluru"],
-        "usa": ["usa", "united states", "us", "california", "new york", "texas", "washington", "boston"],
-        "uk": ["uk", "united kingdom", "london", "manchester", "edinburgh"],
-        "germany": ["germany", "berlin", "munich", "frankfurt"],
-        "canada": ["canada", "toronto", "vancouver", "montreal"]
+        "india": ["india", "bangalore", "mumbai", "delhi", "hyderabad", "pune", "chennai", "kolkata", "bengaluru", "noida", "gurgaon"],
+        "usa": ["usa", "united states", "us", "california", "new york", "texas", "washington", "boston", "san francisco", "seattle"],
+        "uk": ["uk", "united kingdom", "london", "manchester", "edinburgh", "birmingham"],
+        "germany": ["germany", "berlin", "munich", "frankfurt", "hamburg"],
+        "canada": ["canada", "toronto", "vancouver", "montreal", "ottawa"]
     }
     
     for country, cities in location_groups.items():
@@ -177,27 +178,139 @@ def check_location_match(job_location: str, target_location: str) -> bool:
     return False
 
 def filter_jobs_by_role_and_location(jobs: List[Dict], target_role: str, target_location: str, min_relevance: float = 20.0) -> List[Dict]:
-    """Filter jobs based on role relevance and location, add relevance scores"""
+    """Filter jobs based on role relevance and location"""
     filtered = []
     for job in jobs:
-        # Calculate role relevance
         relevance = calculate_role_relevance(job["job_title"], target_role)
         job["role_relevance"] = relevance
-        
-        # Check location match
         location_match = check_location_match(job["location"], target_location)
         
-        # Include if role is relevant AND location matches
         if relevance >= min_relevance and location_match:
             filtered.append(job)
     
-    # Sort by relevance (highest first)
     return sorted(filtered, key=lambda x: x["role_relevance"], reverse=True)
 
 # ─────────────────────────────────────────────
-# SCRAPERS (Enhanced with parallel execution)
+# JOB BOARD API SCRAPERS
 # ─────────────────────────────────────────────
+
+def scrape_jsearch_rapidapi(role: str, loc: str):
+    """JSearch API via RapidAPI - Google for Jobs aggregator"""
+    jobs = []
+    if not API_KEYS.get("jsearch_rapidapi"):
+        return jobs
+    
+    try:
+        url = "https://jsearch.p.rapidapi.com/search"
+        headers = {
+            "X-RapidAPI-Key": API_KEYS["jsearch_rapidapi"],
+            "X-RapidAPI-Host": "jsearch.p.rapidapi.com"
+        }
+        params = {
+            "query": f"{role} in {loc}",
+            "page": "1",
+            "num_pages": "1"
+        }
+        
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        data = response.json()
+        
+        for j in data.get("data", [])[:20]:
+            uid = make_uid("JSearch", j.get("job_id", ""))
+            jobs.append({
+                "uid": uid, "source": "JSearch (Google Jobs)",
+                "job_title": j.get("job_title", "N/A"),
+                "company": j.get("employer_name", "N/A"),
+                "location": j.get("job_city", "") + ", " + j.get("job_country", loc),
+                "experience": j.get("job_required_experience", {}).get("required_experience_in_months", "Not specified"),
+                "salary": j.get("job_salary_currency", "") + " " + str(j.get("job_min_salary", "")) + "-" + str(j.get("job_max_salary", "")) if j.get("job_min_salary") else "Not disclosed",
+                "skills": j.get("job_required_skills", [""])[0] if j.get("job_required_skills") else "Check JD",
+                "description": j.get("job_description", "")[:600],
+                "url": j.get("job_apply_link", j.get("job_google_link", "")),
+                "posted_time": j.get("job_posted_at_datetime_utc", "")[:10],
+                "fetched_at": datetime.now().isoformat(), "is_new": 1, "role_relevance": 0
+            })
+    except Exception as e:
+        pass
+    return jobs
+
+def scrape_adzuna(role: str, loc: str):
+    """Adzuna API - UK, US, and international jobs"""
+    jobs = []
+    if not API_KEYS.get("adzuna_app_id") or not API_KEYS.get("adzuna_app_key"):
+        return jobs
+    
+    try:
+        # Map location to Adzuna country code
+        country_map = {"india": "in", "usa": "us", "uk": "gb", "germany": "de", "canada": "ca"}
+        country = country_map.get(loc.lower(), "us")
+        
+        url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
+        params = {
+            "app_id": API_KEYS["adzuna_app_id"],
+            "app_key": API_KEYS["adzuna_app_key"],
+            "results_per_page": 20,
+            "what": role,
+            "content-type": "application/json"
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        
+        for j in data.get("results", []):
+            uid = make_uid("Adzuna", str(j.get("id", "")))
+            jobs.append({
+                "uid": uid, "source": "Adzuna",
+                "job_title": j.get("title", "N/A"),
+                "company": j.get("company", {}).get("display_name", "N/A"),
+                "location": j.get("location", {}).get("display_name", loc),
+                "experience": "Not specified",
+                "salary": f"${j.get('salary_min', 0)}-${j.get('salary_max', 0)}" if j.get("salary_min") else "Not disclosed",
+                "skills": j.get("category", {}).get("label", "Check JD"),
+                "description": j.get("description", "")[:600],
+                "url": j.get("redirect_url", ""),
+                "posted_time": j.get("created", "")[:10],
+                "fetched_at": datetime.now().isoformat(), "is_new": 1, "role_relevance": 0
+            })
+    except Exception as e:
+        pass
+    return jobs
+
+def scrape_reed_uk(role: str, loc: str):
+    """Reed.co.uk API - UK jobs"""
+    jobs = []
+    if not API_KEYS.get("reed_api_key") or "uk" not in loc.lower():
+        return jobs
+    
+    try:
+        url = "https://www.reed.co.uk/api/1.0/search"
+        auth = (API_KEYS["reed_api_key"], "")
+        params = {"keywords": role, "location": loc, "resultsToTake": 20}
+        
+        response = requests.get(url, auth=auth, params=params, timeout=15)
+        data = response.json()
+        
+        for j in data.get("results", []):
+            uid = make_uid("Reed", str(j.get("jobId", "")))
+            jobs.append({
+                "uid": uid, "source": "Reed.co.uk",
+                "job_title": j.get("jobTitle", "N/A"),
+                "company": j.get("employerName", "N/A"),
+                "location": j.get("locationName", loc),
+                "experience": "Not specified",
+                "salary": f"£{j.get('minimumSalary', 0)}-£{j.get('maximumSalary', 0)}" if j.get("minimumSalary") else "Not disclosed",
+                "skills": "Check JD",
+                "description": j.get("jobDescription", "")[:600],
+                "url": j.get("jobUrl", ""),
+                "posted_time": j.get("date", "")[:10],
+                "fetched_at": datetime.now().isoformat(), "is_new": 1, "role_relevance": 0
+            })
+    except Exception as e:
+        pass
+    return jobs
+
 def scrape_remotive(role: str):
+    """Remotive API - Remote jobs"""
     jobs = []
     try:
         data = requests.get("https://remotive.com/api/remote-jobs",
@@ -220,6 +333,7 @@ def scrape_remotive(role: str):
     return jobs
 
 def scrape_arbeitnow(role: str):
+    """Arbeitnow API - European jobs"""
     jobs = []
     try:
         data = requests.get("https://www.arbeitnow.com/api/job-board-api", timeout=10).json()
@@ -239,7 +353,92 @@ def scrape_arbeitnow(role: str):
     except Exception: pass
     return jobs
 
+def scrape_graphql_jobs(role: str):
+    """GraphQL Jobs API - GraphQL specific jobs"""
+    jobs = []
+    try:
+        url = "https://api.graphql.jobs/"
+        query = """
+        query {
+          jobs(input: { type: FULL_TIME }) {
+            id
+            title
+            slug
+            commitment { title }
+            cities { name country { name } }
+            company { name }
+            description
+            applyUrl
+            postedAt
+          }
+        }
+        """
+        
+        response = requests.post(url, json={"query": query}, timeout=10)
+        data = response.json()
+        
+        for j in data.get("data", {}).get("jobs", [])[:15]:
+            if role.lower() in j.get("title", "").lower():
+                uid = make_uid("GraphQLJobs", j.get("id", ""))
+                city = j.get("cities", [{}])[0] if j.get("cities") else {}
+                location = f"{city.get('name', 'Remote')}, {city.get('country', {}).get('name', '')}"
+                
+                jobs.append({
+                    "uid": uid, "source": "GraphQL Jobs",
+                    "job_title": j.get("title", "N/A"),
+                    "company": j.get("company", {}).get("name", "N/A"),
+                    "location": location,
+                    "experience": "Not specified",
+                    "salary": "Not disclosed",
+                    "skills": "GraphQL",
+                    "description": j.get("description", "")[:600],
+                    "url": j.get("applyUrl", ""),
+                    "posted_time": j.get("postedAt", "")[:10],
+                    "fetched_at": datetime.now().isoformat(), "is_new": 1, "role_relevance": 0
+                })
+    except Exception: pass
+    return jobs
+
+def scrape_usajobs_gov(role: str):
+    """USAJobs.gov API - US Government jobs"""
+    jobs = []
+    try:
+        url = "https://data.usajobs.gov/api/search"
+        headers = {
+            "Host": "data.usajobs.gov",
+            "User-Agent": HEADERS["User-Agent"],
+            "Authorization-Key": os.getenv("USAJOBS_API_KEY", "")
+        }
+        params = {"Keyword": role, "ResultsPerPage": 20}
+        
+        if not headers["Authorization-Key"]:
+            return jobs
+        
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        data = response.json()
+        
+        for j in data.get("SearchResult", {}).get("SearchResultItems", []):
+            job_data = j.get("MatchedObjectDescriptor", {})
+            uid = make_uid("USAJobs", job_data.get("PositionID", ""))
+            
+            jobs.append({
+                "uid": uid, "source": "USAJobs.gov",
+                "job_title": job_data.get("PositionTitle", "N/A"),
+                "company": job_data.get("OrganizationName", "US Government"),
+                "location": ", ".join([loc.get("LocationName", "") for loc in job_data.get("PositionLocation", [])[:2]]),
+                "experience": "Not specified",
+                "salary": f"${job_data.get('PositionRemuneration', [{}])[0].get('MinimumRange', 'Not disclosed')} - ${job_data.get('PositionRemuneration', [{}])[0].get('MaximumRange', '')}",
+                "skills": "Check JD",
+                "description": job_data.get("UserArea", {}).get("Details", {}).get("JobSummary", "")[:600],
+                "url": job_data.get("PositionURI", ""),
+                "posted_time": job_data.get("PublicationStartDate", "")[:10],
+                "fetched_at": datetime.now().isoformat(), "is_new": 1, "role_relevance": 0
+            })
+    except Exception: pass
+    return jobs
+
 def scrape_naukri(role: str, loc: str):
+    """Naukri.com scraper - India jobs"""
     jobs=[]
     try:
         role_s=role.lower().replace(" ","-"); loc_s=loc.lower().replace(" ","-")
@@ -263,6 +462,7 @@ def scrape_naukri(role: str, loc: str):
     return jobs
 
 def scrape_indeed(role: str, loc: str):
+    """Indeed scraper"""
     jobs=[]
     try:
         q=quote_plus(role); l=quote_plus(loc)
@@ -284,25 +484,30 @@ def scrape_indeed(role: str, loc: str):
     return jobs
 
 def clean_jobs(jobs):
+    """Remove redirect/tracking URLs"""
     out=[]
     for j in jobs:
         u=j["url"].lower()
-        if any(x in u for x in["redirect","trk=","tracking","portal","apply-now"]):
+        if any(x in u for x in["redirect","trk=","tracking","portal"]):
             continue
         out.append(j)
     return out
 
 def fetch_real_jobs(role, loc):
-    """Fetch jobs from all sources in parallel with role and location filtering"""
+    """Fetch jobs from ALL sources in parallel"""
     all_jobs = []
     
-    with st.spinner(f"🔍 Fetching jobs for **{role}** in **{loc}**..."):
-        # Use ThreadPoolExecutor for parallel scraping
-        with ThreadPoolExecutor(max_workers=4) as executor:
+    with st.spinner(f"🔍 Fetching jobs from 10+ sources for **{role}** in **{loc}**..."):
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {
+                executor.submit(scrape_jsearch_rapidapi, role, loc): "JSearch (Google Jobs)",
+                executor.submit(scrape_adzuna, role, loc): "Adzuna",
+                executor.submit(scrape_reed_uk, role, loc): "Reed.co.uk",
                 executor.submit(scrape_remotive, role): "Remotive",
                 executor.submit(scrape_arbeitnow, role): "Arbeitnow",
-                executor.submit(scrape_naukri, role, loc): "Naukri",
+                executor.submit(scrape_graphql_jobs, role): "GraphQL Jobs",
+                executor.submit(scrape_usajobs_gov, role): "USAJobs.gov",
+                executor.submit(scrape_naukri, role, loc): "Naukri.com",
                 executor.submit(scrape_indeed, role, loc): "Indeed",
             }
             
@@ -314,21 +519,19 @@ def fetch_real_jobs(role, loc):
                     if jobs:
                         st.info(f"✓ {source}: {len(jobs)} jobs")
                 except Exception as e:
-                    st.warning(f"⚠️ {source} scraping failed")
+                    st.warning(f"⚠️ {source} failed")
     
-    # Clean and filter by role AND location
     cleaned = clean_jobs(all_jobs)
     filtered = filter_jobs_by_role_and_location(cleaned, role, loc, min_relevance=20.0)
     
-    # Show filtering stats
     location_filtered = sum(1 for j in cleaned if check_location_match(j["location"], loc))
     st.success(f"✅ Found **{len(filtered)}** relevant jobs for **{role}** in **{loc}**")
-    st.caption(f"📊 Total scraped: {len(all_jobs)} → Cleaned: {len(cleaned)} → Location match: {location_filtered} → Final: {len(filtered)}")
+    st.caption(f"📊 Total: {len(all_jobs)} → Cleaned: {len(cleaned)} → Location: {location_filtered} → Final: {len(filtered)}")
     
     return filtered
 
 # ─────────────────────────────────────────────
-# DATABASE OPERATIONS (Updated for role_relevance)
+# DATABASE OPERATIONS
 # ─────────────────────────────────────────────
 def save_jobs(jobs):
     conn=get_conn();cur=conn.cursor()
@@ -342,18 +545,15 @@ def save_jobs(jobs):
     conn.commit();conn.close()
 
 def load_jobs(target_role: str = None, target_location: str = None):
-    """Load jobs from database with optional filtering"""
     conn=get_conn();cur=conn.cursor()
     cur.execute("SELECT * FROM jobs ORDER BY role_relevance DESC, fetched_at DESC")
     cols=[d[0] for d in cur.description];rows=[dict(zip(cols,r)) for r in cur.fetchall()]
     conn.close()
     
-    # Apply runtime filters if provided
     if target_role and target_location:
         filtered = []
         for job in rows:
             if check_location_match(job["location"], target_location):
-                # Recalculate relevance for current role
                 job["role_relevance"] = calculate_role_relevance(job["job_title"], target_role)
                 if job["role_relevance"] >= 20.0:
                     filtered.append(job)
@@ -419,12 +619,11 @@ def skill_match(cv_text):
     return present,missing
 
 # ─────────────────────────────────────────────
-# AUTO REFRESH (Enhanced with role awareness)
+# AUTO REFRESH
 # ─────────────────────────────────────────────
 def auto_refresh():
-    """Background thread that refreshes jobs every hour"""
     while True:
-        time.sleep(3600)  # Wait 1 hour
+        time.sleep(3600)
         prefs=load_prefs()
         role,loc=prefs["role"],prefs["location"]
         try:
@@ -450,47 +649,142 @@ def main():
     role_in=st.session_state.get("active_role",prefs["role"])
     loc_in=st.session_state.get("active_loc",prefs["location"])
 
-    st.title("🤖 AI Job Hunting Agent — Pro")
-    st.caption(f"📍 Currently fetching jobs for: **{role_in}** in **{loc_in}**")
+    st.title("🤖 AI Job Hunting Agent — Multi-API Pro")
+    st.caption(f"📍 Searching across 10+ job boards for: **{role_in}** in **{loc_in}**")
 
     with st.sidebar:
-        st.header("Search Settings")
+        st.header("⚙️ Search Settings")
         role=st.text_input("Role",role_in)
         loc=st.text_input("Location",loc_in)
-        if st.button("Search Jobs",use_container_width=True,type="primary"):
+        if st.button("🔍 Search Jobs",use_container_width=True,type="primary"):
             save_prefs(role,loc)
             st.session_state.active_role=role
             st.session_state.active_loc=loc
             st.rerun()
 
         st.markdown("---")
-        st.header("Upload CV")
+        st.header("📄 Upload CV")
         file=st.file_uploader("Upload your CV",type=["pdf","docx","txt"])
         if file:
             name,mime,text=extract_cv(file)
             if text:
                 save_cv(name,mime,text)
-                st.success(f"CV saved: {name}")
+                st.success(f"✅ CV saved: {name}")
             else:
-                st.error("Couldn't extract text from file.")
+                st.error("❌ Couldn't extract text from file.")
+        
+        st.markdown("---")
+        st.header("🔑 API Configuration")
+        st.caption("Add API keys as environment variables:")
+        with st.expander("View API Setup Instructions"):
+            st.code("""
+# Set these environment variables:
+export JSEARCH_API_KEY="your_rapidapi_key"
+export ADZUNA_APP_ID="your_adzuna_id"
+export ADZUNA_APP_KEY="your_adzuna_key"
+export REED_API_KEY="your_reed_key"
+export USAJOBS_API_KEY="your_usajobs_key"
+            """)
+            st.markdown("""
+**Free API Keys Available:**
+- **JSearch (RapidAPI)**: [Get Free Key](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) - 100 requests/month
+- **Adzuna**: [Get Free Key](https://developer.adzuna.com/) - 250 requests/month
+- **Reed.co.uk**: [Get Free Key](https://www.reed.co.uk/developers) - UK jobs
+- **USAJobs.gov**: [Get Free Key](https://developer.usajobs.gov/) - US Gov jobs
+            """)
+        
+        # Show active APIs
+        active_apis = []
+        if API_KEYS.get("jsearch_rapidapi"): active_apis.append("✅ JSearch")
+        else: active_apis.append("⚠️ JSearch (No API Key)")
+        
+        if API_KEYS.get("adzuna_app_id") and API_KEYS.get("adzuna_app_key"): 
+            active_apis.append("✅ Adzuna")
+        else: 
+            active_apis.append("⚠️ Adzuna (No API Key)")
+        
+        if API_KEYS.get("reed_api_key"): active_apis.append("✅ Reed")
+        else: active_apis.append("⚠️ Reed (No API Key)")
+        
+        if API_KEYS.get("usajobs_api_key"): active_apis.append("✅ USAJobs")
+        else: active_apis.append("⚠️ USAJobs (No API Key)")
+        
+        active_apis.extend(["✅ Remotive", "✅ Arbeitnow", "✅ GraphQL Jobs", "✅ Naukri", "✅ Indeed"])
+        
+        st.caption("**Active Sources:**")
+        for api in active_apis:
+            st.caption(api)
 
-    jobs=load_jobs();applied=get_applied();cv=load_cv()
+    jobs=load_jobs(role_in, loc_in);applied=get_applied();cv=load_cv()
     cv_name,cv_mime,cv_text=cv
 
-    if st.button("🔄 Refresh Live Jobs",use_container_width=True):
-        jobs=fetch_real_jobs(role_in,loc_in)
-        if jobs:
-            save_jobs(jobs)
-            st.success(f"Updated {len(jobs)} jobs for {role_in} in {loc_in}")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("🔄 Refresh Live Jobs",use_container_width=True):
+            jobs=fetch_real_jobs(role_in,loc_in)
+            if jobs:
+                save_jobs(jobs)
+                st.success(f"✅ Updated {len(jobs)} jobs for **{role_in}** in **{loc_in}**")
+                st.rerun()
+            else:
+                st.warning(f"⚠️ No jobs found for **{role_in}** in **{loc_in}**. Try different search terms.")
+    
+    with col2:
+        if st.button("🗑️ Clear All Jobs", use_container_width=True):
+            conn = get_conn()
+            conn.execute("DELETE FROM jobs")
+            conn.commit()
+            conn.close()
+            st.success("✅ All jobs cleared")
             st.rerun()
 
     if not jobs:
-        st.info("Click **Search Jobs** to fetch live listings.")
+        st.info(f"🔍 Click **Search Jobs** to fetch live listings for **{role_in}** in **{loc_in}**")
+        st.markdown("---")
+        st.subheader("📊 Available Job Boards")
+        st.markdown("""
+        This agent aggregates jobs from:
+        1. **JSearch (Google Jobs)** - Aggregates from 100+ job sites
+        2. **Adzuna** - UK, US, and international jobs
+        3. **Reed.co.uk** - Leading UK job board
+        4. **Remotive** - Remote-first jobs worldwide
+        5. **Arbeitnow** - European tech jobs
+        6. **GraphQL Jobs** - GraphQL-specific positions
+        7. **USAJobs.gov** - US Government positions
+        8. **Naukri.com** - India's #1 job portal
+        9. **Indeed** - Global job search
+        
+        **Note:** Some APIs require free API keys. See sidebar for setup instructions.
+        """)
         return
 
-    st.subheader(f"💼 Showing {len(jobs)} Jobs")
+    st.subheader(f"💼 Showing {len(jobs)} Jobs for {role_in} in {loc_in}")
+    
+    # Add filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        sources = list(set([j["source"] for j in jobs]))
+        selected_source = st.selectbox("Filter by Source", ["All Sources"] + sources)
+    with col2:
+        min_relevance = st.slider("Minimum Role Match %", 0, 100, 20)
+    with col3:
+        sort_by = st.selectbox("Sort by", ["Role Match", "Date Posted", "Company"])
+    
+    # Apply filters
+    filtered_jobs = jobs
+    if selected_source != "All Sources":
+        filtered_jobs = [j for j in filtered_jobs if j["source"] == selected_source]
+    filtered_jobs = [j for j in filtered_jobs if j.get("role_relevance", 0) >= min_relevance]
+    
+    if sort_by == "Date Posted":
+        filtered_jobs = sorted(filtered_jobs, key=lambda x: x["posted_time"], reverse=True)
+    elif sort_by == "Company":
+        filtered_jobs = sorted(filtered_jobs, key=lambda x: x["company"])
+    
+    st.caption(f"Showing {len(filtered_jobs)} jobs after filters")
+    st.markdown("---")
 
-    for j in jobs[:20]:
+    for idx, j in enumerate(filtered_jobs[:25], 1):
         jd_text=(j["job_title"]+" "+j["description"]+" "+j["skills"]).lower()
         score=cosine_score(cv_text,jd_text) if cv_text else 0
         present,missing=skill_match(cv_text) if cv_text else ([],[])
@@ -499,24 +793,50 @@ def main():
         relevance = j.get("role_relevance", 0)
         if relevance >= 85:
             badge = "🟢 Perfect Match"
+            badge_color = "#28a745"
         elif relevance >= 70:
             badge = "🟡 Good Match"
+            badge_color = "#ffc107"
         elif relevance >= 50:
             badge = "🟠 Partial Match"
+            badge_color = "#fd7e14"
         else:
             badge = "⚪ Low Match"
+            badge_color = "#6c757d"
         
-        st.markdown(f"### {j['job_title']} — {j['company']} ({j['location']}) {badge}")
-        st.write(f"🌐 {j['source']} | 💰 {j['salary']} | 🕒 {j['posted_time']} | 🎯 Role Match: {relevance:.0f}%")
-        if cv_text:
-            st.write(f"**CV ↔ JD Match:** {score}%  |  Missing Skills: {', '.join(missing[:5]) or 'None'}")
-        st.write(j["description"])
-        st.link_button("🚀 Apply Now",j["url"])
-        if j["uid"] not in applied:
-            if st.button("✅ Mark as Applied",key=j["uid"]):
-                mark_applied(j["uid"])
-                st.rerun()
-        st.markdown("---")
+        # Job card
+        with st.container():
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"### {idx}. {j['job_title']}")
+                st.markdown(f"**{j['company']}** • {j['location']} • <span style='color:{badge_color}'>{badge}</span>", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"**{j['source']}**")
+                st.caption(f"🕒 {j['posted_time']}")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"💰 **Salary:** {j['salary']}")
+                st.write(f"🎯 **Role Match:** {relevance:.0f}%")
+                if cv_text:
+                    st.write(f"📄 **CV-JD Match:** {score}%")
+                    if missing[:3]:
+                        st.write(f"🔍 **Missing Skills:** {', '.join(missing[:3])}")
+            with col2:
+                st.link_button("🚀 Apply Now", j["url"], use_container_width=True)
+                if j["uid"] not in applied:
+                    if st.button("✅ Mark Applied", key=f"apply_{j['uid']}", use_container_width=True):
+                        mark_applied(j["uid"])
+                        st.rerun()
+                else:
+                    st.success("✓ Applied", icon="✅")
+            
+            with st.expander("📝 View Full Description"):
+                st.write(j["description"])
+                st.write(f"**Skills:** {j['skills']}")
+                st.write(f"**Experience:** {j['experience']}")
+            
+            st.markdown("---")
 
 if __name__=="__main__":
     main()
