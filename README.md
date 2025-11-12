@@ -1,5 +1,3 @@
-# {{ name }} — {{ target_title }}
-
 
 **Email:** {{ email }} · **Location:** {{ location or "India" }}
 
