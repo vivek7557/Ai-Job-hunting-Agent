@@ -1,6 +1,0 @@
-streamlit
-scikit-learn
-pandas
-numpy
-python-multipart
-gunicorn
