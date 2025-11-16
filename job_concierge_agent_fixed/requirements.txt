@@ -1,12 +1,8 @@
-streamlit
-scikit-learn
-pandas
-numpy
-python-multipart
-gunicorn
 streamlit==1.32.0
 numpy==1.26.4
 pandas==2.1.4
 scikit-learn==1.3.2
+apscheduler
+requests
 python-multipart
 gunicorn
