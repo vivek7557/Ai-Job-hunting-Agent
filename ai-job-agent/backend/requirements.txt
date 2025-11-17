@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-requests
-beautifulsoup4
-apscheduler
-python-multipart
-pydantic
-sentence-transformers # optional
-openai # optional
