@@ -6,3 +6,4 @@ apscheduler
 requests
 python-multipart
 gunicorn
+scikit-learn
