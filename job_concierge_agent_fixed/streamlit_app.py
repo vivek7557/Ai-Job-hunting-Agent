@@ -1,120 +1,137 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import streamlit as st
 import logging
-
-from tools.cv_upload_tool import read_uploaded_file
-from agents.resume_parser_agent import parse_resume_text
+from agents.job_scraper_agent import fetch_real_jobs
 from agents.recommendation_agent import RecommendationAgent
+from tools.cv_upload_tool import read_uploaded_file
+from agents.skill_extractor import extract_skills
 from memory.long_term_memory import MemoryBank
-from tools.google_search_tool import search_jobs   # optional
+import time
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("job_agent")
-
-# -----------------------------
-# Streamlit Page Config
-# -----------------------------
 st.set_page_config(
     page_title="AI Job Concierge",
+    page_icon="💼",
     layout="wide",
-    page_icon="💼"
+    initial_sidebar_state="expanded"
 )
 
-st.title("💼 AI Job Concierge — Professional Job Matching Tool")
+logger = logging.getLogger("ui")
+
+# ---------------------------
+#  UI STYLES
+# ---------------------------
 st.markdown("""
-Upload your resume → Parse → Fetch jobs → Get recommendations  
-**Fully automated ML-powered job concierge.**
-""")
+    <style>
+    .big-title { font-size: 40px; font-weight: bold; padding-bottom: 10px; }
+    .sub { font-size: 20px; opacity: 0.85; margin-bottom: 20px; }
+    .card {
+        background: #ffffff08; 
+        padding: 20px; 
+        border-radius: 15px; 
+        backdrop-filter: blur(10px); 
+        border: 1px solid #ffffff30;
+        margin-bottom: 25px;
+    }
+    .job-title { font-size: 22px; font-weight: 700; }
+    .job-company { font-size: 18px; opacity: 0.85; }
+    .chip {
+        display: inline-block;
+        padding: 6px 12px;
+        background: #4a4a4a;
+        color: white;
+        border-radius: 15px;
+        margin: 3px;
+        font-size: 13px;
+    }
+    .score-bar {
+        height: 12px;
+        border-radius: 6px;
+        background: #444;
+        margin-top: 8px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Memory instance
-memory = MemoryBank()
+# ---------------------------
+# Title
+# ---------------------------
+st.markdown("<div class='big-title'>💼 AI Job Concierge</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub'>Upload resume → Extract skills → Fetch real jobs → Rank using AI embeddings</div>", unsafe_allow_html=True)
 
-# -----------------------------
+# Memory
+mb = MemoryBank()
+
 # Sidebar
-# -----------------------------
 with st.sidebar:
-    st.header("👤 User Profile")
-
+    st.header("⚙️ Settings")
     user_id = st.text_input("User ID (optional)")
-    if st.button("Load Profile"):
-        profile = memory.get_profile(user_id)
-        if profile:
-            st.success("Profile Loaded")
-            st.json(profile)
-        else:
-            st.error("Profile not found!")
 
     if st.button("Create Sample Profile"):
         sample = {"name": "Demo User", "preferences": {"role": "ML Engineer", "location": "India"}}
-        saved_id = memory.save_profile(user_id, sample)
-        st.success(f"Profile created: {saved_id}")
+        uid = mb.save_profile(user_id, sample)
+        st.success(f"Profile Created: {uid}")
 
-# -----------------------------
-# Resume Section
-# -----------------------------
-st.header("📄 Step 1 — Upload Resume")
+# ---------------------------
+# Resume Upload
+# ---------------------------
 col1, col2 = st.columns(2)
 
 with col1:
-    uploaded = st.file_uploader("Upload resume file", type=["txt", "pdf", "docx"])
+    st.subheader("📄 Upload Resume")
+    uploaded = st.file_uploader("Upload your resume file", type=["pdf", "txt", "docx"])
 
 with col2:
     resume_text = st.text_area("Or paste resume text manually")
 
 if uploaded:
     resume_text = read_uploaded_file(uploaded)
-    st.success("Resume loaded successfully")
+    st.success("Resume loaded successfully!")
 
-# -----------------------------
-# Parse Resume
-# -----------------------------
-st.header("🔍 Step 2 — Parse Resume")
-
-parsed_resume = None
-if st.button("Parse Resume"):
-    if not resume_text:
-        st.error("Please upload or paste your resume first.")
+# ---------------------------
+# Skill Extraction
+# ---------------------------
+if resume_text:
+    st.markdown("### 🧠 Extracted Skills")
+    skills = extract_skills(resume_text)
+    if len(skills) > 0:
+        chip_html = "".join([f"<span class='chip'>{s}</span>" for s in skills])
+        st.markdown(chip_html, unsafe_allow_html=True)
     else:
-        parsed_resume = parse_resume_text(resume_text)
-        st.subheader("Extracted Resume Details")
-        st.json(parsed_resume)
+        st.info("No major skills detected — try adding more content.")
 
-# -----------------------------
-# Job Search + Recommendation
-# -----------------------------
-st.header("🎯 Step 3 — Job Search & Recommendations")
+# ---------------------------
+# Job Search
+# ---------------------------
+st.markdown("### 🔍 Job Search")
+query = st.text_input("Search Jobs", value="Machine Learning Engineer")
+threshold = st.slider("Recommendation Threshold", 0.0, 1.0, 0.20)
 
-query = st.text_input("Job Search Query", value="Machine Learning Engineer")
-threshold = st.slider("Match Threshold", 0.0, 1.0, 0.20)
-
-if st.button("Search & Recommend"):
+if st.button("Fetch Jobs"):
     if not resume_text:
-        st.error("Resume required!")
+        st.error("Upload or paste resume first.")
     else:
-        st.info("Fetching jobs…")
+        with st.spinner("Fetching real jobs from Indeed, Naukri, LinkedIn..."):
+            jobs = fetch_real_jobs(query, top_k=10)
+            time.sleep(1)
 
-        # 🤖 Initialize agent
-        recommender = RecommendationAgent()
+        st.success(f"Fetched {len(jobs)} jobs!")
 
-        # You can replace search_jobs() with live scraper later
-        jobs = search_jobs(query)
+        rec_agent = RecommendationAgent()
+        results = rec_agent.recommend_once(resume_text, query, threshold)
 
-        if not jobs:
-            st.error("No jobs found!")
-        else:
-            st.success(f"Fetched {len(jobs)} jobs")
+        st.markdown("## 🎯 Top Recommended Jobs")
 
-            st.info("Matching your resume with job descriptions…")
-            results = recommender.recommend_once(resume_text, query, threshold)
+        for job in results:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.markdown(f"<div class='job-title'>{job['title']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='job-company'>{job['company']}</div>", unsafe_allow_html=True)
+            st.write(job["description"][:300] + "...")
+            st.markdown(f"[Apply →]({job['url']})")
 
-            st.subheader(f"Top {len(results)} Matched Jobs")
-            for job in results[:30]:
-                st.markdown(f"### **{job['title']}** — *{job['company']}*")
-                st.markdown(f"[Apply Here]({job['url']})")
-                st.caption(f"Score: **{job['score']:.3f}**")
-                st.write(job["description"][:250] + "…")
-                st.markdown("---")
+            score_pct = int(job["score"] * 100)
+            st.markdown(f"Score: **{score_pct}%**")
 
+            st.markdown(
+                f"<div class='score-bar' style='width:{score_pct}%; background:#00c853;'></div>",
+                unsafe_allow_html=True
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
