@@ -7,3 +7,15 @@ requests
 python-multipart
 gunicorn
 scikit-learn
+streamlit
+openai
+anthropic
+tavily-python
+pypdf
+python-docx
+sentence-transformers
+scikit-learn
+numpy
+pandas
+requests
+beautifulsoup4
