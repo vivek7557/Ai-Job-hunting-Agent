@@ -1,7 +1,7 @@
 streamlit==1.32.0
-pandas==2.2.2
 numpy==1.26.4
-scikit-learn==1.4.0
+pandas==2.2.2
+scikit-learn==1.4.2
 sentence-transformers
 openai
 anthropic
