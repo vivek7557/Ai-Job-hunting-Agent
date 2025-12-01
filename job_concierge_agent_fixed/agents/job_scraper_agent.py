@@ -1,57 +1,136 @@
-"""Job Scraper Agent (enhanced mock version with long realistic JDs)."""
+"""
+Real Job Scraper — Indeed, Naukri, LinkedIn (Safe HTML Scraping)
+"""
 
+import requests
+from bs4 import BeautifulSoup
+import logging
 from typing import List, Dict
-import datetime, logging, time
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-LONG_DESCRIPTION_TEMPLATE = """
-We are hiring a {query} Engineer to design, develop, and deploy production-grade machine learning 
-systems. Responsibilities include data preprocessing, feature engineering, building ML pipelines, 
-training and evaluating models, A/B testing, and deploying models into production.
 
-You will work with Python, SQL, TensorFlow/PyTorch, Scikit-learn, data pipelines, cloud platforms 
-(AWS, GCP, Azure), CI/CD, Docker, Kubernetes, experiment tracking, and MLOps workflows.
-
-Strong experience with machine learning algorithms, NLP, deep learning, and large datasets is expected.
-Experience with model optimization, monitoring, vector databases, and LLMs is a plus.
-"""
-
-def _make_mock_job(query: str, i: int) -> Dict:
-    now = datetime.datetime.utcnow()
-    return {
-        "id": f"job_{query}_{i}",
-        "title": f"{query} Engineer {i}",
-        "company": f"Company {i}",
-        "posted_at": (now - datetime.timedelta(minutes=5*i)).isoformat() + "Z",
-        "url": f"https://example.com/jobs/{query}/{i}",
-        "description": LONG_DESCRIPTION_TEMPLATE.format(query=query)
-    }
-
-def fetch_fresh_jobs(query: str, max_results: int = 20) -> List[Dict]:
-    """Return a list of job dicts (mock implementation)."""
+# -------------------------
+# 1. INDEED SCRAPER
+# -------------------------
+def scrape_indeed(query: str, location: str = "India", limit=5) -> List[Dict]:
     jobs = []
-    for i in range(min(max_results, 10)):
-        jobs.append(_make_mock_job(query, i))
-    logger.info(f"Fetched {len(jobs)} enhanced mock jobs for query='{query}'")
+    q = query.replace(" ", "+")
+    loc = location.replace(" ", "+")
+
+    url = f"https://in.indeed.com/jobs?q={q}&l={loc}"
+
+    try:
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        cards = soup.select("div.job_seen_beacon")[:limit]
+
+        for i, card in enumerate(cards):
+            title = card.select_one("h2.jobTitle").text.strip() if card.select_one("h2.jobTitle") else "No Title"
+            company = card.select_one("span.companyName").text.strip() if card.select_one("span.companyName") else "Unknown"
+            desc = card.select_one("div.job-snippet").text.strip() if card.select_one("div.job-snippet") else ""
+            jobs.append({
+                "id": f"indeed_{i}",
+                "title": title,
+                "company": company,
+                "url": f"https://in.indeed.com{card.a['href']}" if card.a else url,
+                "description": desc
+            })
+
+        logger.info(f"Indeed scraped {len(jobs)} jobs")
+
+    except Exception as e:
+        logger.error("Indeed scraping error: %s", e)
+
     return jobs
 
-def fetch_from_sources_parallel(query: str, sources: List[str], per_source: int = 5) -> List[Dict]:
-    """Mock parallel fetch across multiple sources using ThreadPoolExecutor."""
-    results = []
 
-    def fetch_source(src):
-        time.sleep(0.1)
-        return [_make_mock_job(f"{query}_{src}", i) for i in range(per_source)]
+# -------------------------
+# 2. NAUKRI SCRAPER
+# -------------------------
+def scrape_naukri(query: str, limit=5) -> List[Dict]:
+    jobs = []
+    q = query.replace(" ", "-")
+    url = f"https://www.naukri.com/{q}-jobs"
 
-    with ThreadPoolExecutor(max_workers=min(8, len(sources))) as ex:
-        futures = [ex.submit(fetch_source, s) for s in sources]
-        for f in futures:
-            try:
-                results.extend(f.result())
-            except Exception:
-                logger.exception('Error fetching from source')
+    try:
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
 
-    logger.info(f"Parallel fetched {len(results)} enhanced jobs from {len(sources)} sources")
-    return results
+        cards = soup.select("article.jobTuple.bgWhite")[:limit]
+
+        for i, card in enumerate(cards):
+            title = card.select_one("a.title").text.strip() if card.select_one("a.title") else "No Title"
+            company = card.select_one("a.subTitle").text.strip() if card.select_one("a.subTitle") else "Unknown"
+            desc = card.select_one("div.job-description").text.strip() if card.select_one("div.job-description") else ""
+
+            jobs.append({
+                "id": f"naukri_{i}",
+                "title": title,
+                "company": company,
+                "url": card.select_one("a.title")["href"] if card.select_one("a.title") else url,
+                "description": desc
+            })
+
+        logger.info(f"Naukri scraped {len(jobs)} jobs")
+
+    except Exception as e:
+        logger.error("Naukri scraping error: %s", e)
+
+    return jobs
+
+
+# -------------------------
+# 3. LINKEDIN (SAFE PUBLIC SEARCH)
+# -------------------------
+def scrape_linkedin(query: str, limit=5) -> List[Dict]:
+    jobs = []
+    q = query.replace(" ", "%20")
+
+    url = f"https://www.linkedin.com/jobs/search/?keywords={q}&location=India"
+
+    try:
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        cards = soup.select("div.base-card")[:limit]
+
+        for i, card in enumerate(cards):
+            title = card.select_one("h3.base-search-card__title").text.strip() if card.select_one("h3.base-search-card__title") else "No Title"
+            company = card.select_one("h4.base-search-card__subtitle").text.strip() if card.select_one("h4.base-search-card__subtitle") else "Unknown"
+            desc = "LinkedIn does not expose full job description in HTML search results."
+
+            url_el = card.select_one("a.base-card__full-link")
+            link = url_el["href"] if url_el else url
+
+            jobs.append({
+                "id": f"linkedin_{i}",
+                "title": title,
+                "company": company,
+                "url": link,
+                "description": desc,
+            })
+
+        logger.info(f"LinkedIn scraped {len(jobs)} jobs")
+
+    except Exception as e:
+        logger.error("LinkedIn scraping error: %s", e)
+
+    return jobs
+
+
+# -------------------------
+# MERGE ALL SOURCES
+# -------------------------
+def fetch_real_jobs(query: str, top_k: int = 10) -> List[Dict]:
+    indeed = scrape_indeed(query, limit=5)
+    naukri = scrape_naukri(query, limit=5)
+    linkedin = scrape_linkedin(query, limit=5)
+
+    jobs = indeed + naukri + linkedin
+    jobs = jobs[:top_k]
+
+    logger.info(f"Total scraped jobs: {len(jobs)}")
+
+    return jobs
