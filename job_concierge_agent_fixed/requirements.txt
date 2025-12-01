@@ -10,3 +10,6 @@ pypdf
 python-docx
 requests
 beautifulsoup4
+sentence-transformers
+torch
+transformers
