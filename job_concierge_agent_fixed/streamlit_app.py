@@ -2,7 +2,13 @@
 Also exposes a record() hook for observability/metrics.
 """
 import logging
+import sys
+import os
 from typing import List, Dict
+
+# Add the current directory to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from jd_matcher_agent import JDMatcher
 from job_scraper_agent import fetch_real_jobs
 from scheduler_controller import SchedulerController
