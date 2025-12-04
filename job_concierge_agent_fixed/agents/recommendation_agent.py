@@ -4,7 +4,7 @@ Also exposes a record() hook for observability/metrics.
 import logging
 from typing import List, Dict
 from .jd_matcher_agent import JDMatcher
-from .job_scraper_agent import fetch_fresh_jobs
+from .job_scraper_agent import fetch_real_jobs
 from .scheduler_controller import SchedulerController
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ class RecommendationAgent:
         self._listeners = []  # A2A listeners or UI callbacks
 
     def recommend_once(self, resume_text: str, query: str, threshold: float = 0.2) -> List[Dict]:
-        jobs = fetch_fresh_jobs(query, max_results=50)
+        jobs = fetch_real_jobs(query, top_k=50)
         scored = self.matcher.score(resume_text, jobs)
         recommended = [s for s in scored if s['score'] >= threshold]
         logger.info(f"RecommendationAgent found {len(recommended)} recommendations for threshold={threshold}")
