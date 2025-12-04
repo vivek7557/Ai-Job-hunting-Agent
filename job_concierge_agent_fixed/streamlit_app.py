@@ -3,9 +3,9 @@ Also exposes a record() hook for observability/metrics.
 """
 import logging
 from typing import List, Dict
-from .jd_matcher_agent import JDMatcher
-from .job_scraper_agent import fetch_real_jobs
-from .scheduler_controller import SchedulerController
+from jd_matcher_agent import JDMatcher
+from job_scraper_agent import fetch_real_jobs
+from scheduler_controller import SchedulerController
 import agents.skill_extractor as skill_extractor
 extract_skills = skill_extractor.extract_skills
 
