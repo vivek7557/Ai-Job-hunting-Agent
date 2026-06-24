@@ -1,92 +1,61 @@
-"""Recommendation Agent with start/stop (pause/resume) support using SchedulerController.
-Also exposes a record() hook for observability/metrics.
-"""
+"""Streamlit App for AI Job Concierge"""
 import logging
 import sys
-import os
-from typing import List, Dict
 from pathlib import Path
 
-# Add the parent directory and current directory to Python path
+# Add the parent directory to Python path for imports
 current_dir = Path(__file__).parent
 parent_dir = current_dir.parent
-sys.path.insert(0, str(current_dir))
 sys.path.insert(0, str(parent_dir))
 
-# Try multiple import strategies
-try:
-    # Strategy 1: Direct import from same directory
-    from jd_matcher_agent import JDMatcher
-    from job_scraper_agent import fetch_real_jobs
-    from scheduler_controller import SchedulerController
-except ImportError:
-    try:
-        # Strategy 2: Import from job_concierge_agent_fixed package
-        from job_concierge_agent_fixed.jd_matcher_agent import JDMatcher
-        from job_concierge_agent_fixed.job_scraper_agent import fetch_real_jobs
-        from job_concierge_agent_fixed.scheduler_controller import SchedulerController
-    except ImportError:
-        # Strategy 3: Show error and available modules
-        print("Import Error: Cannot find required modules")
-        print(f"Current directory: {current_dir}")
-        print(f"Files in current directory: {list(current_dir.glob('*.py'))}")
-        print(f"Python path: {sys.path}")
-        raise
+import streamlit as st
+from tools.cv_upload_tool import read_uploaded_file
+from agents.resume_parser_agent import parse_resume_text
+from agents.recommendation_agent import RecommendationAgent
+from memory.long_term_memory import MemoryBank
 
-try:
-    import agents.skill_extractor as skill_extractor
-    extract_skills = skill_extractor.extract_skills
-except ImportError:
-    print("Warning: Could not import skill_extractor, continuing without it")
-    extract_skills = None
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('ai_job_concierge')
 
-logger = logging.getLogger(__name__)
+st.set_page_config(page_title='AI Job Concierge Agent', layout='centered')
 
-class RecommendationAgent:
-    def __init__(self):
-        self.matcher = JDMatcher()
-        self.scheduler = SchedulerController()
-        self._last_run = None
-        self._listeners = []  # A2A listeners or UI callbacks
+st.title('AI Job Concierge — Demo')
+st.markdown('Upload your resume (TXT/PDF) and search for roles. This demo uses a mocked job fetcher.')
 
-    def recommend_once(self, resume_text: str, query: str, threshold: float = 0.2) -> List[Dict]:
-        # FIXED: using correct function name + correct argument
-        jobs = fetch_real_jobs(query, top_k=50)
+mb = MemoryBank()
 
-        scored = self.matcher.score(resume_text, jobs)
-        recommended = [s for s in scored if s['score'] >= threshold]
+with st.sidebar:
+    st.header('User Profile')
+    user_id = st.text_input('User ID (optional)')
+    if st.button('Create sample profile'):
+        sample = {'name':'Demo User', 'preferences':{'location':'India','role':'ML Engineer'}}
+        uid = mb.save_profile(user_id, sample)
+        st.success(f'Created profile {uid}')
 
-        logger.info(
-            f"RecommendationAgent found {len(recommended)} recommendations for threshold={threshold}"
-        )
+uploaded = st.file_uploader('Upload your resume (txt or paste text)', type=['txt','pdf','docx'])
+resume_text = st.text_area('Or paste resume text here (quick)')
 
-        self._last_run = {'query': query, 'count': len(recommended)}
+resume_parsed = None
+if uploaded is not None:
+    resume_text = read_uploaded_file(uploaded)
 
-        # notify listeners (A2A)
-        for l in self._listeners:
-            try:
-                l.handle_recommendations(recommended)
-            except Exception:
-                logger.exception('A2A listener error')
+if st.button('Parse Resume') and resume_text:
+    resume_parsed = parse_resume_text(resume_text)
+    st.subheader('Parsed Resume')
+    st.json(resume_parsed)
 
-        return recommended
-
-    def start_periodic(self, func, seconds=3600):
-        return self.scheduler.start_periodic(func, seconds=seconds)
-
-    def stop_periodic(self):
-        self.scheduler.stop()
-
-    def is_running(self):
-        return self.scheduler.is_running()
-
-    def add_listener(self, listener):
-        """Add an A2A listener (object with handle_recommendations method)."""
-        self._listeners.append(listener)
-
-
-# Test if this is the main streamlit app being run
-if __name__ == "__main__":
-    print("RecommendationAgent module loaded successfully!")
-    print(f"Current directory: {Path(__file__).parent}")
-    print(f"Available in this module: {dir()}")
+st.markdown('---')
+st.subheader('Job Search & Match')
+query = st.text_input('Search query (e.g., Machine Learning)', value='Machine Learning')
+threshold = st.slider('Recommendation threshold (cosine similarity)', min_value=0.0, max_value=1.0, value=0.15)
+if st.button('Fetch & Recommend'):
+    if not resume_text:
+        st.error('Upload or paste resume text first.')
+    else:
+        rec_agent = RecommendationAgent()
+        recommended = rec_agent.recommend_once(resume_text, query, threshold)
+        st.write(f'Found {len(recommended)} recommended jobs (threshold={threshold})')
+        for r in recommended[:20]:
+            st.markdown(f"**{r['title']}** at *{r['company']}* — score: {r['score']:.3f}")
+            st.markdown(r['url'])
+            st.caption(r['description'][:300] + '...')
